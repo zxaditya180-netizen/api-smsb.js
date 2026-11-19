@@ -1,0 +1,153 @@
+  </div>
+  <div class="feature">
+    <div class="feature-icon">📊</div>
+    <h3>Live Telemetry</h3>
+    <p>Real-time sent/failed counters, animated progress bar, and per-cycle dispatch status.</p>
+  </div>
+  <div class="feature">
+    <div class="feature-icon">🛑</div>
+    <h3>Instant Halt</h3>
+    <p>Emergency stop mid-sequence. All pending dispatches drop immediately.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-inner">
+    <div class="footer-brand">
+      <span>Developed by</span>
+      <span class="dev">ADIBHAI</span>
+    </div>
+    <div class="footer-note">© 2026 SMS-B · Educational use only</div>
+  </div>
+</footer>
+
+<script>
+const API_SMSB = "/api/smsb";
+const FILTERS = ["call", "whatsapp", "sms", "coro"];
+
+const input = document.getElementById("targetInput");
+const countInput = document.getElementById("countInput");
+const burstInput = document.getElementById("burstInput");
+const fireBtn = document.getElementById("fireBtn");
+const haltBtn = document.getElementById("haltBtn");
+const filterGrid = document.getElementById("filterGrid");
+const progressWrap = document.getElementById("progressWrap");
+const progressFill = document.getElementById("progressFill");
+const progressText = document.getElementById("progressText");
+const statSent = document.getElementById("statSent");
+const statFailed = document.getElementById("statFailed");
+const statTotal = document.getElementById("statTotal");
+const statusLine = document.getElementById("statusLine");
+
+let selectedFilter = "all";
+let running = false;
+let stopFlag = false;
+let sent = 0, failed = 0, done = 0, total = 0;
+
+filterGrid.addEventListener("click", e => {
+  const btn = e.target.closest(".filter-btn");
+  if (!btn || running) return;
+  filterGrid.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  selectedFilter = btn.dataset.filter;
+});
+
+function setStatus(msg, cls) {
+  statusLine.className = "status-line " + (cls || "");
+  statusLine.innerHTML = msg || "";
+}
+function refreshStats() {
+  statSent.textContent = sent;
+  statFailed.textContent = failed;
+  statTotal.textContent = sent + failed;
+}
+
+async function fireOne(number, filter) {
+  try {
+    const r = await fetch(API_SMSB, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ number, filter })
+    });
+    const txt = await r.text();
+    let ok = r.ok;
+    try {
+      const j = JSON.parse(txt);
+      if (j && j.stats && typeof j.stats.ok === "number") {
+        ok = j.stats.ok > 0;
+      } else if (j && j.status === false) {
+        ok = false;
+      }
+    } catch {}
+    return ok;
+  } catch { return false; }
+}
+
+fireBtn.addEventListener("click", async () => {
+  if (running) return;
+
+  const num = input.value.replace(/\D/g, "");
+  if (num.length !== 10) {
+    setStatus("Invalid input. Enter a valid 10-digit mobile number.", "err");
+    return;
+  }
+
+  total = Math.max(1, Math.min(500, parseInt(countInput.value) || 10));
+  const burst = Math.max(1, Math.min(30, parseInt(burstInput.value) || 6));
+  const channels = selectedFilter === "all" ? FILTERS : [selectedFilter];
+
+  running = true; stopFlag = false;
+  sent = 0; failed = 0; done = 0;
+
+  fireBtn.disabled = true;
+  haltBtn.disabled = false;
+  progressWrap.classList.add("active");
+  progressFill.style.width = "0%";
+  progressText.textContent = `0 / ${total}`;
+  refreshStats();
+  setStatus(`Initializing ${selectedFilter.toUpperCase()} sequence...`, "");
+
+  const dispatch = async () => {
+    if (stopFlag) return;
+    const filter = channels[Math.floor(Math.random() * channels.length)];
+    const ok = await fireOne(num, filter);
+    if (ok) sent++; else failed++;
+    done++;
+    const pct = Math.round((done / total) * 100);
+    progressFill.style.width = pct + "%";
+    progressText.textContent = `${done} / ${total} (${pct}%)`;
+    refreshStats();
+    if (done % 3 === 0 || done === total) {
+      setStatus(`[${done}/${total}] channel=${filter} · Sent: ${sent} | Failed: ${failed}`);
+    }
+  };
+
+  for (let i = 0; i < total; i += burst) {
+    if (stopFlag) break;
+    const batch = [];
+    for (let j = 0; j < burst && (i + j) < total; j++) batch.push(dispatch());
+    await Promise.allSettled(batch);
+  }
+
+  if (stopFlag) {
+    setStatus(`Sequence aborted · Sent=${sent} Failed=${failed}`, "err");
+  } else {
+    setStatus(`Sequence completed · Sent: ${sent} | Failed: ${failed}`, sent > 0 ? "ok" : "err");
+  }
+
+  running = false;
+  fireBtn.disabled = false;
+  haltBtn.disabled = true;
+});
+
+haltBtn.addEventListener("click", () => {
+  if (!running) return;
+  stopFlag = true;
+  setStatus("Halting pipeline...", "err");
+});
+
+input.addEventListener("keydown", e => { if (e.key === "Enter") fireBtn.click(); });
+</script>
+
+</body>
+</html>
